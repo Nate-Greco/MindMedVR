@@ -1,0 +1,86 @@
+import socket
+from brainflow.board_shim import BoardShim, BrainFlowInputParams, BoardIds
+from brainflow.data_filter import DataFilter, WindowOperations
+import time
+import numpy as np
+
+# Initialize the board
+params = BrainFlowInputParams()
+params.serial_port = 'COM4'
+board_id = -1
+board = BoardShim(board_id, params)
+board.prepare_session()
+
+sampling_rate = BoardShim.get_sampling_rate(board_id)
+eeg_channels = BoardShim.get_eeg_channels(board_id)
+window = WindowOperations.HAMMING.value
+
+
+# Socket Setup
+HOST = '127.0.0.1'  # Localhost for testing
+PORT = 12345        # Port for communication
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.bind((HOST, PORT))
+server.listen(1)
+print(f"Server is listening on {HOST}:{PORT}")
+conn, addr = server.accept()
+print(f"Connected to Unity at {addr}")
+
+
+
+def getBandPower(data):
+    alphaBands = []
+    betaBands = []
+    for i in range(len(eeg_channels)):
+        channel_data = data[eeg_channels[i]]
+
+        if len(channel_data) == 0:
+            raise ValueError("Channel data is empty. Ensure the board is streaming correctly.")
+
+        if len(channel_data) % 2 != 0:
+            channel_data = channel_data[:-1]  # Trim to even length
+
+        if sampling_rate < 1:
+            raise ValueError("Invalid sampling rate. Ensure the board configuration is correct.")
+
+        psd = DataFilter.get_psd(channel_data, sampling_rate, window)
+
+        alpha_band_power = DataFilter.get_band_power(psd, 8.0, 12.0)
+        alphaBands.append(alpha_band_power)
+        
+        beta_band_power = DataFilter.get_band_power(psd,13.0,30.0)
+        betaBands.append(beta_band_power)
+    mean_alpha = np.mean(alphaBands)
+    mean_beta = np.mean(betaBands)
+    return mean_alpha , mean_beta
+    
+
+def RunningMachine():
+    data = board.get_board_data()  # Collect some data
+    return getBandPower(data)
+
+board.start_stream()
+alphaArray = []
+betaArray = []
+looperCount = 0
+while True:
+    time.sleep(1)
+    try:
+        looperCount += 1
+        alpha, beta = RunningMachine()
+        alphaArray.append(alpha)
+        betaArray.append(beta)
+        if looperCount == 2:  
+            alphaPrint = alphaArray.pop(1) - alphaArray.pop(0)
+            betaPrint = betaArray.pop(1) - betaArray.pop(0)
+            if alphaPrint < 0 and betaPrint:
+
+                conn.sendall(str("Stress").encode())  # Send data to Unity
+            looperCount = 0
+    except Exception as e:
+        print(f"Error: {e}")
+        break
+
+conn.close()
+board.stop_stream()
+board.release_session()
