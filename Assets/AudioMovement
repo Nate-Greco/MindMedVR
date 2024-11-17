@@ -1,0 +1,94 @@
+using System;
+using System.Net.Sockets;
+using System.Text;
+using UnityEngine;
+
+public class PythonDetect : MonoBehaviour
+{
+   public NewMovement other;
+    private TcpClient client;
+    private NetworkStream stream;
+
+    private int waypointNow = 0;
+    public GameObject[] Waypoints;
+    private float speed = 2;
+
+    public AudioSource source;
+    public AudioClip clip;
+    void Start()
+    {
+        try
+        {
+            // Connect to the Python server
+            client = new TcpClient("127.0.0.1", 12345); // Match HOST and PORT
+            stream = client.GetStream();
+            Debug.Log("Connected to Python server");
+        }
+        catch (Exception e)
+        {
+            Debug.LogError("Connection error: " + e.Message);
+        }
+    }
+
+    int stressCounter;
+    int relCounter;
+    void Update()
+    {
+       if( waypointNow < Waypoints.Length){
+            print(speed);
+                var distance = Vector3.Distance(transform.position, Waypoints[waypointNow].transform.position);
+
+                if (distance < 0.5f){
+                    waypointNow++;
+                }
+
+                float step = speed * Time.deltaTime;
+            
+                transform.position = Vector3.MoveTowards(transform.position, Waypoints[waypointNow].transform.position, step); 
+         }
+
+        if (stream != null && stream.DataAvailable)
+        {
+            // Receive data from Python
+            byte[] data = new byte[1024];
+            int bytesRead = stream.Read(data, 0, data.Length);
+            string pythonReturn = Encoding.UTF8.GetString(data, 0, bytesRead);
+            Debug.Log("Received Beta/Alpha difference: " + pythonReturn);
+           
+            if (pythonReturn == "Stress"){
+                stressCounter++;
+                if (stressCounter > 2 && relCounter < 4){
+                    if (speed != 1) {
+                        source.PlayOneShot(clip);
+                        speed -= 1;
+                    } else {
+                        speed++;
+                    }
+                    
+                    stressCounter = 0;
+                    relCounter++;
+                } else if(stressCounter > 2 && relCounter >= 4){
+                    stressCounter = 0 ;
+                    speed ++;
+                }
+                
+            } else {
+                relCounter++;
+                if (relCounter > 5) {
+                    relCounter = 0;
+                    speed ++;
+                }
+            }
+
+        }
+
+       
+    }
+
+    private void OnApplicationQuit()
+    {
+        // Clean up
+        stream?.Close();
+        client?.Close();
+    }
+}
